@@ -234,12 +234,12 @@ location rather than mixing in a precision change.
 
 | # | Config | Step (ms) | Samples/sec | Epoch (s) | Speedup |
 |--:|---|---:|---:|---:|---:|
-|  2 | CPU torchvision (bf16-mixed) — baseline   | 749.4 | 341.6 | 27.72 | 1.00× |
-|  3 | + GPU kornia stacked (fp16-mixed)         | 298.1 | 858.8 | 11.03 | 2.51× |
-|  4 | **+ GPU kornia stacked (bf16-mixed)** ⭐  | **293.9** | **870.9** | **10.87** | **2.55×** |
-|  5 | + GPU kornia stacked + FP8 (`transformer-engine`) | 342.5 | 747.5 | 12.67 | 2.19× ↓ |
-|  6 | + FP8 + `torch.compile(model)`            | 363.3 | 704.7 | 13.44 | 2.06× ↓↓ |
-|  7 | + FP8 + bs=512                            | 333.9 | 766.6 | 12.35 | 2.24× ↓ |
+| 1 | CPU torchvision (bf16-mixed) — baseline   | 749.4 | 341.6 | 27.72 | 1.00× |
+| 2 | + GPU kornia stacked (fp16-mixed)         | 298.1 | 858.8 | 11.03 | 2.51× |
+| 3 | **+ GPU kornia stacked (bf16-mixed)** ⭐  | **293.9** | **870.9** | **10.87** | **2.55×** |
+| 4 | + GPU kornia stacked + FP8 (`transformer-engine`) | 342.5 | 747.5 | 12.67 | 2.19× ↓ |
+| 5 | + FP8 + `torch.compile(model)`            | 363.3 | 704.7 | 13.44 | 2.06× ↓↓ |
+| 6 | + FP8 + bs=512                            | 333.9 | 766.6 | 12.35 | 2.24× ↓ |
 
 **Recommendation for ViT-S/16-class workloads:** `precision="bf16-mixed"`
 + `GPUCompose` + `StackedMultiView` (row 3). Avoid FP8 below ViT-B.
@@ -291,12 +291,12 @@ Rows sorted by speedup (fastest first).
 
 | # | Config (ViT-L, bs=384) | Step (ms) | Samples/sec | Epoch (s) | Speedup |
 |--:|---|---:|---:|---:|---:|
-|  2 | **+ GPU kornia stacked + FP8 + compile(model)** ⭐ | **751.0** | **511.3** | **18.52** | **1.53×** |
-|  3 | + GPU kornia stacked + FP8                         |  797.6 | 481.5 | 19.67 | 1.44× |
-|  4 | + GPU kornia stacked (bf16) + compile(model)       |  798.5 | 480.9 | 19.69 | 1.44× |
-|  5 | + GPU kornia stacked (bf16-mixed)                  |  931.7 | 412.2 | 22.97 | 1.23× |
-|  6 | + CPU torchvision (bf16) + compile(model)          |  951.5 | 403.6 | 23.46 | 1.21× |
-|  7 | CPU torchvision (bf16-mixed) — baseline            | 1149.8 | 334.0 | 28.35 | 1.00× |
+| 1 | **+ GPU kornia stacked + FP8 + compile(model)** ⭐ | **751.0** | **511.3** | **18.52** | **1.53×** |
+| 2 | + GPU kornia stacked + FP8                         |  797.6 | 481.5 | 19.67 | 1.44× |
+| 3 | + GPU kornia stacked (bf16) + compile(model)       |  798.5 | 480.9 | 19.69 | 1.44× |
+| 4 | + GPU kornia stacked (bf16-mixed)                  |  931.7 | 412.2 | 22.97 | 1.23× |
+| 5 | + CPU torchvision (bf16) + compile(model)          |  951.5 | 403.6 | 23.46 | 1.21× |
+| 6 | CPU torchvision (bf16-mixed) — baseline            | 1149.8 | 334.0 | 28.35 | 1.00× |
 
 Three findings vs ViT-S:
 
