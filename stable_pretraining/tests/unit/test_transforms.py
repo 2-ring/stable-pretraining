@@ -1006,3 +1006,47 @@ class TestMultiViewTransform:
             view = output[key]
             assert isinstance(view, dict)
             assert "image" in view
+
+
+@pytest.mark.unit
+class TestIWMAction:
+    """Test suite for transforms.IWMAction transform."""
+
+    def test_no_transformation_is_zero(self):
+        """Test skipped jitters and no destructive augmentations give a zero action."""
+        sample = {"source": {"ColorJitter": torch.zeros(8)}, "target": {}}
+        action = transforms.IWMAction()(sample)["action"]
+        assert torch.equal(action, torch.zeros(7))
+
+    def test_jitter_delta_and_flags(self):
+        """Test jitter is target minus source and flags come from the source."""
+        source = {
+            "ColorJitter": torch.tensor([1.2, 0.8, 1.0, 0.05, 0, 1, 2, 3]),
+            "RandomGrayscale": True,
+            "GaussianBlur": torch.tensor([0.5, 0.5]),
+            "RandomSolarize": False,
+        }
+        target = {"ColorJitter": torch.zeros(8)}  # skipped -> identity
+        action = transforms.IWMAction()({"source": source, "target": target})["action"]
+        expected = torch.tensor([-0.2, 0.2, 0.0, -0.05, 1.0, 1.0, 0.0])
+        assert torch.allclose(action, expected)
+
+    def test_recorded_params(self):
+        """Test the action reads the parameters recorded by real transforms."""
+        t = transforms.Compose(
+            transforms.MultiViewTransform(
+                {
+                    "target": transforms.ColorJitter(0.4, 0.4, 0.2, 0.1, p=1.0),
+                    "source": transforms.Compose(
+                        transforms.ColorJitter(0.4, 0.4, 0.2, 0.1, p=1.0),
+                        transforms.RandomGrayscale(p=1.0),
+                        transforms.GaussianBlur(kernel_size=3, p=1.0),
+                        transforms.RandomSolarize(threshold=0.5, p=1.0),
+                    ),
+                }
+            ),
+            transforms.IWMAction(),
+        )
+        action = t({"image": torch.rand(3, 32, 32)})["action"]
+        assert action.shape == (7,)
+        assert torch.equal(action[4:], torch.ones(3))

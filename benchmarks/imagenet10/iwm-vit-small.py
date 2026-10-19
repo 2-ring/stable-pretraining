@@ -8,8 +8,9 @@ def iwm_train_transform():
     """Source/target views from Garrido et al. 2024, Appendix A.1.
 
     A shared crop and flip, then independent color jitters on each view, with
-    the destructive augmentations on the source only. Source order follows
-    BYOL (jitter, grayscale, blur, solarize); the paper doesn't give one.
+    the destructive augmentations on the source only, and finally the action
+    between them. Source order follows BYOL (jitter, grayscale, blur, solarize);
+    the paper doesn't give one.
     """
     return transforms.Compose(
         transforms.RGB(),
@@ -31,4 +32,5 @@ def iwm_train_transform():
                 ),
             }
         ),
+        transforms.IWMAction(),
     )
