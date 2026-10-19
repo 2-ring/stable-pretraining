@@ -1165,6 +1165,11 @@ class FlexibleTransformer(nn.Module):
     :param add_mask_token: Enable learnable [MASK] token for masked prediction.
         When enabled, use `context_mask` and/or `query_mask` in forward() to
         replace tokens at specified positions with the [MASK] token.
+    :param query_cond_net: Network conditioning the query tokens on a per-sample
+        vector (None disables). When set, pass `query_cond` in forward(): it is
+        concatenated to every query token after positional embedding and mapped
+        back by this network, which must take `hidden_dim + C` features and return
+        `hidden_dim` (feature conditioning, as in IWM).
 
     Example::
 
@@ -1301,6 +1306,7 @@ class FlexibleTransformer(nn.Module):
         num_prefix_tokens: int = 1,
         num_registers: int = 0,
         add_mask_token: bool = False,
+        query_cond_net: Optional[nn.Module] = None,
         # Modern transformer features forwarded to every TransformerBlock.
         # Use ``pos_embed_type='none'`` together with ``use_rope='2d'`` (or
         # ``'3d'``) to get pure RoPE-2D/3D positional encoding (no additive
@@ -1428,6 +1434,9 @@ class FlexibleTransformer(nn.Module):
             self.mask_token = nn.Parameter(torch.zeros(1, 1, hidden_dim))
             nn.init.normal_(self.mask_token, std=0.02)
 
+        # Query conditioning network: [query, cond] -> query
+        self.query_cond_net = query_cond_net
+
         # Time embedding MLP (only needed for AdaLN)
         if use_adaln:
             self.time_mlp = nn.Sequential(
@@ -1551,6 +1560,7 @@ class FlexibleTransformer(nn.Module):
         context_mask: Optional[torch.Tensor] = None,
         query_mask: Optional[torch.Tensor] = None,
         attn_mask: Optional[torch.Tensor] = None,
+        query_cond: Optional[torch.Tensor] = None,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """Forward pass.
 
@@ -1579,6 +1589,8 @@ class FlexibleTransformer(nn.Module):
             For leave-one-out prediction, use `torch.eye(T, dtype=torch.bool)`.
             Only applies to joint attention mode (cross_attn=False).
             The mask is automatically expanded to account for registers.
+        :param query_cond: Per-sample conditioning vector [B, C], applied to every
+            query token. Required if and only if query_cond_net was given.
         :return: Output embeddings. Shape depends on mode:
             - cross_attn=True: [B, N_qry, output_dim]
             - cross_attn=False, return_all=False: [B, N_qry, output_dim]
@@ -1628,6 +1640,11 @@ class FlexibleTransformer(nn.Module):
             mask_tokens = self.mask_token.expand_as(queries)
             queries = torch.where(query_mask.unsqueeze(-1), mask_tokens, queries)
         queries = queries + self._gather_pos(query_idx)
+        if (query_cond is None) != (self.query_cond_net is None):
+            raise ValueError("query_cond and query_cond_net must be used together")
+        if query_cond is not None:
+            query_cond = query_cond.unsqueeze(1).expand(-1, queries.shape[1], -1)
+            queries = self.query_cond_net(torch.cat([queries, query_cond], dim=-1))
 
         n_context_orig = context.shape[1]  # before adding registers
         n_queries = queries.shape[1]
