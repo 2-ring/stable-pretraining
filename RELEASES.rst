@@ -25,7 +25,8 @@ Unreleased
   encodes that action from the parameters recorded by the augmentations, and a
   ``query_cond_net`` option on ``FlexibleTransformer`` to condition query
   tokens on a per-sample vector. Registered in ``stable_pretraining.methods``
-  and ``METHODS.md``.
+  and ``METHODS.md``, with an Imagenette ViT-S/16 benchmark under
+  ``benchmarks/imagenet10/iwm-vit-small.py``.
 
 **Discoverability improvements**
 
