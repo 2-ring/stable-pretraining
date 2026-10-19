@@ -13,16 +13,16 @@ References:
 Example::
 
     from stable_pretraining.methods import IWM
-    from stable_pretraining.callbacks import TeacherStudentCallback
-    import lightning as pl
 
-    # Equivariant world model: IWM^Equi_{18,384}
-    model = IWM("vit_base_patch16_224", predictor_depth=18)
+    # Default predictor (18 x 384) is the paper's IWM^Equi_{18,384} configuration
+    model = IWM("vit_base_patch16_224")
 
-    # Views and action come from the data pipeline, e.g.
-    # MultiViewTransform({"source": ..., "target": ...}) + transforms.IWMAction()
-    trainer = pl.Trainer(max_epochs=300, callbacks=[TeacherStudentCallback()])
-    trainer.fit(model, dataloader)
+    # source/target views and the action between them come from the data
+    # pipeline: MultiViewTransform({"source": ..., "target": ...}) followed by
+    # transforms.IWMAction(). For a full training script (batch adapter,
+    # TeacherStudentCallback, Manager), see benchmarks/imagenet10/iwm-vit-small.py.
+    output = model(source, target, action)
+    output.loss.backward()
 
     # Get encoder for downstream tasks
     encoder = model.encoder.student
@@ -74,13 +74,14 @@ class IWM(Module):
     The source is masked with the union of ``num_targets`` blocks; the context is
     every other patch. Mask tokens are conditioned on the action by feature
     conditioning: concatenated with it after positional embedding and mixed by a
-    3-layer MLP (Appendix A.1). The loss is the squared L2 distance to the
-    (layer-normed) teacher representation.
+    3-layer MLP (Appendix A.1). The loss is the mean squared error to the teacher
+    representation, layer-normed as in the I-JEPA implementation.
 
     :param model_or_model_name: timm model name string or pre-instantiated nn.Module
     :param predictor_embed_dim: Predictor hidden dimension (default: 384)
-    :param predictor_depth: Number of predictor blocks (default: 18, IWM^Equi;
-        12 gives the invariant IWM^Inv)
+    :param predictor_depth: Number of predictor blocks (default: 18, the paper's
+        IWM^Equi_{18,384} configuration; deeper predictors more reliably learn an
+        equivariant world model)
     :param action_dim: Size of the action vector (default: 7, as produced by
         :class:`~stable_pretraining.data.transforms.IWMAction`)
     :param num_targets: Number of masked blocks (default: 4)
@@ -142,7 +143,7 @@ class IWM(Module):
         embed_dim = base_encoder.embed_dim
         num_patches = base_encoder.default_grid_h * base_encoder.default_grid_w
 
-        # Feature conditioning: [mask token + pos, action] -> mask token
+        # Feature conditioning (Appendix A.1): [mask token + pos, action] -> mask token
         action_mlp = nn.Sequential(
             nn.Linear(predictor_embed_dim + action_dim, predictor_embed_dim),
             nn.ReLU(),
@@ -151,7 +152,6 @@ class IWM(Module):
             nn.Linear(predictor_embed_dim, predictor_embed_dim),
         )
 
-        # World model: joint self-attention over [context + conditioned mask tokens]
         self.predictor = FlexibleTransformer(
             input_dim=embed_dim,
             hidden_dim=predictor_embed_dim,
@@ -168,7 +168,7 @@ class IWM(Module):
             query_cond_net=action_mlp,
         )
 
-        # Mask = union of target blocks (may overlap); context = all other patches
+        # Mask = union of target blocks (may overlap); context = all other patches (A.1)
         self.masking = IJEPAMasking(
             num_targets=num_targets,
             target_scale=target_scale,
@@ -221,7 +221,7 @@ class IWM(Module):
             - Encodes the full target through the teacher (EMA)
             - Predicts the target representation at the masked positions,
               conditioned on the action
-            - Returns the L2 loss between predictions and targets
+            - Returns the mean squared error between predictions and targets
 
         In eval mode:
             - No masking, encodes all source patches through the student
@@ -230,9 +230,9 @@ class IWM(Module):
         :param source: Source views [B, C, H, W] (or images to embed in eval)
         :param target: Target views [B, C, H, W] (training only)
         :param action: Action mapping source to target [B, action_dim] (training only)
-        :param embedding_source: Which encoder to use for the embedding output.
-            ``"teacher"`` (default, encodes the target) or ``"student"``
-            (encodes the source). Only affects training mode.
+        :param embedding_source: Which encoder embeds the target view for the
+            embedding output: ``"teacher"`` (default) or ``"student"``. Only
+            affects training mode; eval mode always uses the student.
         :return: :class:`IWMOutput` with loss and representations
         """
         if embedding_source not in ("teacher", "student"):
@@ -261,7 +261,6 @@ class IWM(Module):
         if target is None or action is None:
             raise ValueError("IWM training requires target and action")
 
-        # Context: student sees the source outside the masked blocks
         mask_out = self.masking(student_patches, grid_h, grid_w)
         context = self._encode(
             student_patches,
@@ -287,15 +286,18 @@ class IWM(Module):
                 mask_out.target_idx.unsqueeze(-1).expand(-1, -1, D),
             )
 
+            # Embedding: the target view, which has no destructive augmentations
             if embedding_source == "teacher":
                 embedding = teacher_full
             else:
                 embedding = self._encode(
-                    student_patches, all_idx, grid_h, grid_w, self.encoder.student
+                    self.encoder.student.patch_embed(target),
+                    all_idx,
+                    grid_h,
+                    grid_w,
+                    self.encoder.student,
                 )
 
-        # Predict the target at the masked positions from [context + mask tokens],
-        # with mask tokens conditioned on the action
         N_tgt = mask_out.target_idx.shape[1]
         queries = torch.zeros(
             B, N_tgt, self.embed_dim, device=source.device, dtype=context.dtype
@@ -310,6 +312,7 @@ class IWM(Module):
             query_cond=action,
         )
 
+        # Squared L2 of the paper, averaged over masked patches as in I-JEPA
         loss = F.mse_loss(predictions, targets)
 
         return IWMOutput(

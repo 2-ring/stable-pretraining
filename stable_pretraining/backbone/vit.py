@@ -1135,6 +1135,7 @@ class FlexibleTransformer(nn.Module):
     Unified backbone for:
     - **MAE decoder**: `self_attn=True, cross_attn=False, use_adaln=False`
     - **IJEPA predictor**: `self_attn=True, cross_attn=True, use_adaln=False`
+    - **IWM predictor**: IJEPA predictor + `query_cond_net` (action-conditioned queries)
     - **DiT / Flow**: `self_attn=True, cross_attn=True/False, use_adaln=True`
     - **MaskGIT**: `self_attn=True, cross_attn=False, use_adaln=True, add_mask_token=True`
     - **Lightweight predictor**: `self_attn=True, cross_attn=False, use_adaln=False, num_registers>0`
@@ -1306,7 +1307,6 @@ class FlexibleTransformer(nn.Module):
         num_prefix_tokens: int = 1,
         num_registers: int = 0,
         add_mask_token: bool = False,
-        query_cond_net: Optional[nn.Module] = None,
         # Modern transformer features forwarded to every TransformerBlock.
         # Use ``pos_embed_type='none'`` together with ``use_rope='2d'`` (or
         # ``'3d'``) to get pure RoPE-2D/3D positional encoding (no additive
@@ -1322,6 +1322,7 @@ class FlexibleTransformer(nn.Module):
         use_layer_scale: bool = False,
         layer_scale_init: float = 1e-5,
         max_grid_size: int = 32,
+        query_cond_net: Optional[nn.Module] = None,
     ):
         super().__init__()
         if hidden_dim % num_heads != 0:
@@ -1434,7 +1435,6 @@ class FlexibleTransformer(nn.Module):
             self.mask_token = nn.Parameter(torch.zeros(1, 1, hidden_dim))
             nn.init.normal_(self.mask_token, std=0.02)
 
-        # Query conditioning network: [query, cond] -> query
         self.query_cond_net = query_cond_net
 
         # Time embedding MLP (only needed for AdaLN)
@@ -1620,6 +1620,8 @@ class FlexibleTransformer(nn.Module):
                     "context_mask or query_mask provided but "
                     "add_mask_token=False at initialization"
                 )
+        if (query_cond is None) != (self.query_cond_net is None):
+            raise ValueError("query_cond and query_cond_net must be used together")
 
         if num_prefix is None:
             num_prefix = self.num_prefix_tokens
@@ -1640,10 +1642,9 @@ class FlexibleTransformer(nn.Module):
             mask_tokens = self.mask_token.expand_as(queries)
             queries = torch.where(query_mask.unsqueeze(-1), mask_tokens, queries)
         queries = queries + self._gather_pos(query_idx)
-        if (query_cond is None) != (self.query_cond_net is None):
-            raise ValueError("query_cond and query_cond_net must be used together")
         if query_cond is not None:
-            query_cond = query_cond.unsqueeze(1).expand(-1, queries.shape[1], -1)
+            query_cond = query_cond.to(queries.dtype).unsqueeze(1)
+            query_cond = query_cond.expand(-1, queries.shape[1], -1)
             queries = self.query_cond_net(torch.cat([queries, query_cond], dim=-1))
 
         n_context_orig = context.shape[1]  # before adding registers

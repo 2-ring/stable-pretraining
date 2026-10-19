@@ -620,7 +620,9 @@ class TestFlexibleTransformerForward:
             cross_attn=False,
             use_adaln=False,
             add_mask_token=True,
-            query_cond_net=nn.Linear(model_config["hidden_dim"] + 7, 64),
+            query_cond_net=nn.Linear(
+                model_config["hidden_dim"] + 7, model_config["hidden_dim"]
+            ),
             zero_init_output=False,
         )
 
@@ -652,7 +654,9 @@ class TestFlexibleTransformerForward:
         conditioned = FlexibleTransformer(
             **model_config,
             use_adaln=False,
-            query_cond_net=nn.Linear(model_config["hidden_dim"] + 7, 64),
+            query_cond_net=nn.Linear(
+                model_config["hidden_dim"] + 7, model_config["hidden_dim"]
+            ),
         )
         context = torch.randn(batch_size, 20, model_config["input_dim"])
         queries = torch.randn(batch_size, 10, model_config["input_dim"])

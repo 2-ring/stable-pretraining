@@ -1230,11 +1230,14 @@ class IWMAction(Transform):
     :class:`ColorJitter` in both views, and by :class:`RandomGrayscale`,
     :class:`GaussianBlur` and :class:`RandomSolarize` in the source, and writes::
 
-        [Δbrightness, Δcontrast, Δsaturation, Δhue, grayscale, blur, solarize]
+        [brightness, contrast, saturation, hue, grayscale, blur, solarize]
 
-    Jitter deltas are target minus source, following Garrido et al. (2023).
-    A skipped or absent jitter counts as the identity and an absent destructive
-    augmentation as not applied, so an all-zero action means no transformation.
+    Brightness, contrast and saturation are multiplicative, so they are encoded
+    as target / source factor ratios; hue is additive, so as target - source
+    (matching the actions shown in the paper's Fig. 1). A skipped or absent
+    jitter counts as the identity and an absent destructive augmentation as not
+    applied, so ``[1, 1, 1, 0, 0, 0, 0]`` means no transformation. The random
+    order in which ColorJitter applies its four adjustments is not encoded.
 
     Args:
         source_view: Key of the source view.
@@ -1242,7 +1245,7 @@ class IWMAction(Transform):
         target: Key the action is written to.
     """
 
-    IDENTITY_JITTER = (1.0, 1.0, 1.0, 0.0)
+    _IDENTITY_JITTER = (1.0, 1.0, 1.0, 0.0)
 
     def __init__(
         self,
@@ -1258,12 +1261,13 @@ class IWMAction(Transform):
     def _jitter(self, view):
         params = view.get("ColorJitter")
         if params is None or not params.any():
-            return torch.tensor(self.IDENTITY_JITTER)
+            return torch.tensor(self._IDENTITY_JITTER)
         return params[:4]
 
     def __call__(self, x):
         source = self.nested_get(x, self.source_view)
         target = self.nested_get(x, self.target_view)
+        jitter_s, jitter_t = self._jitter(source), self._jitter(target)
         blur = source.get("GaussianBlur")
         destructive = torch.tensor(
             [
@@ -1273,7 +1277,7 @@ class IWMAction(Transform):
             ]
         )
         x[self.target] = torch.cat(
-            [self._jitter(target) - self._jitter(source), destructive]
+            [jitter_t[:3] / jitter_s[:3], jitter_t[3:] - jitter_s[3:], destructive]
         )
         return x
 
